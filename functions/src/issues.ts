@@ -56,6 +56,7 @@ export const reportIssue = onCall({ region: REGION }, async (req) => {
     severity,
     status: "open",
     createdBy: req.auth?.uid,
+    createdByRole: req.auth?.token?.role,
     createdAt: now,
     updatedAt: now,
   };

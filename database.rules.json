@@ -1,6 +1,74 @@
 {
   "rules": {
-    ".read": true,
-    ".write": true
+    ".read": false,
+    ".write": false,
+    "users": {
+      "$uid": {
+        ".read": "auth.uid === $uid || auth.token.role === 'admin'",
+        ".write": "auth.token.role === 'admin'"
+      }
+    },
+    "shops": {
+      "$shopId": {
+        ".read": "auth != null",
+        ".write": "auth.token.role === 'admin'"
+      }
+    },
+    "generators": {
+      ".indexOn": ["shop_id", "status"],
+      "$genId": {
+        ".read": "auth.token.role === 'admin' || (query.orderByChild === 'shop_id' && query.equalTo === auth.token.shopId)",
+        ".write": "auth.token.role === 'admin'"
+      }
+    },
+    "batteries": {
+      ".indexOn": ["generator_id", "type"],
+      "$batId": {
+        ".read": "auth.token.role === 'admin' || auth.token.role === 'inventory'",
+        ".write": "auth.token.role === 'admin' || auth.token.role === 'inventory'"
+      }
+    },
+    "tasks": {
+      ".indexOn": ["assigned_to", "status"],
+      "$taskId": {
+        ".read": "auth.token.role === 'admin' || auth.uid === data.child('assigned_to').val()",
+        ".write": "auth.token.role === 'admin' || auth.token.role === 'operator'"
+      }
+    },
+    "serviceLogs": {
+      ".indexOn": ["generator_id", "technician_id", "next_due_date"],
+      "$logId": {
+        ".read": "auth.token.role === 'admin' || auth.token.role === 'technician'",
+        ".write": "auth.token.role === 'admin' || auth.token.role === 'technician'"
+      }
+    },
+    "issues": {
+      ".indexOn": ["equipment_id", "status", "createdByRole"],
+      "$issueId": {
+        ".read": "auth.token.role === 'admin' || (auth.token.role === 'technician' && data.child('createdByRole').val() === 'operator') || data.child('createdBy').val() === auth.uid",
+        ".write": "auth != null"
+      }
+    },
+    "invoices": {
+      ".indexOn": ["shop_id", "status"],
+      "$invoiceId": {
+        ".read": "auth.token.role === 'admin' || data.child('shop_id').val() === auth.token.shopId",
+        ".write": "auth.token.role === 'admin'"
+      }
+    },
+    "notifications": {
+      "$uid": {
+        ".read": "auth.uid === $uid",
+        ".write": "auth.token.role === 'admin' || auth.uid === $uid"
+      }
+    },
+    "reports": {
+      "$type": {
+        "$date": {
+          ".read": "auth.token.role === 'admin'",
+          ".write": "auth.token.role === 'admin'"
+        }
+      }
+    }
   }
 }
