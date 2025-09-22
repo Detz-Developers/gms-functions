@@ -1,6 +1,7 @@
 // functions/src/shops.ts
 import * as db from "firebase-functions/v2/database";
 import admin from "firebase-admin";
+import { REGION } from "./config.js";
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -8,7 +9,7 @@ if (!admin.apps.length) {
 
 // Auto-set timestamps on create
 export const onShopCreate = db.onValueCreated(
-  { ref: "/shops/{shopId}", region: "us-central1" },
+  { ref: "/shops/{shopId}", region: REGION },
   async (event) => {
     const shopId = event.params.shopId;
     const shop = event.data.val();
@@ -28,10 +29,10 @@ export const onShopCreate = db.onValueCreated(
 
 // Auto-bump updatedAt on any change, but ignore updates that only touch updatedAt
 export const onShopUpdate = db.onValueUpdated(
-  { ref: "/shops/{shopId}", region: "us-central1" },
+  { ref: "/shops/{shopId}", region: REGION },
   async (event) => {
     const before = event.data.before.val() ?? {};
-    const after  = event.data.after.val() ?? {};
+    const after = event.data.after.val() ?? {};
 
     // compare without the updatedAt field
     const { updatedAt: _b, ...bRest } = before;
@@ -47,3 +48,4 @@ export const onShopUpdate = db.onValueUpdated(
       .set(admin.database.ServerValue.TIMESTAMP);
   }
 );
+

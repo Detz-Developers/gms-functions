@@ -1,12 +1,11 @@
-
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import admin from "firebase-admin";
+import { REGION } from "./config.js";
 
 if (!admin.apps.length) {
   admin.initializeApp();
 }
 
-const REGION = "us-central1";
 const usersRef = () => admin.database().ref("users");
 
 // Check admin role
@@ -34,7 +33,7 @@ export const createUserProfile = onCall({ region: REGION }, async (req) => {
     role,
     status: "active",
     createdAt: now,
-    updatedAt: now,
+    updatedAt: now
   });
 
   await admin.auth().setCustomUserClaims(uid, { role });
@@ -64,3 +63,4 @@ export const setUserStatus = onCall({ region: REGION }, async (req) => {
   await usersRef().child(uid).child("status").set(disabled ? "disabled" : "active");
   return { ok: true };
 });
+

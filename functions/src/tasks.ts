@@ -1,12 +1,12 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as db from "firebase-functions/v2/database";
 import admin from "firebase-admin";
+import { REGION } from "./config.js";
 
 if (!admin.apps.length) {
   admin.initializeApp();
 }
 
-const REGION = "us-central1";
 const tasksRef = () => admin.database().ref("tasks");
 
 // Helper: only admin/operator can create tasks
@@ -69,7 +69,7 @@ export const createTask = onCall({ region: REGION }, async (req) => {
     status: "Pending",
     priority,
     createdAt: now,
-    updatedAt: now,
+    updatedAt: now
   };
 
   await tasksRef().child(id).set(payload);
@@ -105,3 +105,4 @@ export const setTaskStatus = onCall({ region: REGION }, async (req) => {
   await tasksRef().child(id).child("updatedAt").set(Date.now());
   return { ok: true };
 });
+

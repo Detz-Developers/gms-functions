@@ -1,12 +1,12 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as db from "firebase-functions/v2/database";
 import admin from "firebase-admin";
+import { REGION } from "./config.js";
 
 if (!admin.apps.length) {
   admin.initializeApp();
 }
 
-const REGION = "us-central1";
 const invoicesRef = () => admin.database().ref("invoices");
 
 // Helpers
@@ -59,7 +59,7 @@ export const createInvoice = onCall({ region: REGION }, async (req) => {
     status: "Pending",
     due_date: due_date ?? null,
     createdAt: now,
-    updatedAt: now,
+    updatedAt: now
   };
 
   await invoicesRef().child(id).set(payload);
@@ -76,3 +76,4 @@ export const markInvoicePaid = onCall({ region: REGION }, async (req) => {
   await invoicesRef().child(id).child("updatedAt").set(Date.now());
   return { ok: true };
 });
+

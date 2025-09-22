@@ -26,6 +26,9 @@ module.exports = {
     "import",
   ],
   rules: {
+    "linebreak-style": "off",
+    "camelcase": "off",
+    "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
     "object-curly-spacing": ["error", "always"], // allow { a: 1 }
     "max-len": ["warn", { "code": 120 }],        // 120-char lines
     "comma-dangle": ["error", "never"],          // no trailing commas
@@ -35,3 +38,4 @@ module.exports = {
     "import/no-unresolved": 0
   },
 };
+

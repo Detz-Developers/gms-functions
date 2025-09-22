@@ -1,12 +1,12 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as db from "firebase-functions/v2/database";
 import admin from "firebase-admin";
+import { REGION } from "./config.js";
 
 if (!admin.apps.length) {
   admin.initializeApp();
 }
 
-const REGION = "us-central1";
 const serviceLogsRef = () => admin.database().ref("serviceLogs");
 const generatorsRef = () => admin.database().ref("generators");
 
@@ -65,7 +65,7 @@ export const logService = onCall({ region: REGION }, async (req) => {
     notes: notes ?? "",
     overdue: next_due_date ? Date.now() > next_due_date : false,
     createdAt: now,
-    updatedAt: now,
+    updatedAt: now
   };
 
   await serviceLogsRef().child(id).set(payload);
@@ -98,3 +98,4 @@ export const markOverdueServices = onCall({ region: REGION }, async (req) => {
   }
   return { updated: Object.keys(updates).length };
 });
+

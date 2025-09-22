@@ -1,12 +1,12 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as db from "firebase-functions/v2/database";
 import admin from "firebase-admin";
+import { REGION } from "./config.js";
 
 if (!admin.apps.length) {
   admin.initializeApp();
 }
 
-const REGION = "us-central1";
 const issuesRef = () => admin.database().ref("issues");
 
 // Helpers
@@ -58,7 +58,7 @@ export const reportIssue = onCall({ region: REGION }, async (req) => {
     createdBy: req.auth?.uid,
     createdByRole: req.auth?.token?.role,
     createdAt: now,
-    updatedAt: now,
+    updatedAt: now
   };
 
   await issuesRef().child(id).set(payload);
@@ -75,7 +75,7 @@ export const assignIssue = onCall({ region: REGION }, async (req) => {
 
   await issuesRef().child(id).update({
     assigned_to: technician_id,
-    updatedAt: Date.now(),
+    updatedAt: Date.now()
   });
 
   // TODO: integrate with notifications.ts → notify technician
@@ -103,3 +103,4 @@ export const linkGatePass = onCall({ region: REGION }, async (req) => {
   await issuesRef().child(id).child("updatedAt").set(Date.now());
   return { ok: true };
 });
+

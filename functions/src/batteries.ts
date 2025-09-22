@@ -1,12 +1,12 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as db from "firebase-functions/v2/database";
 import admin from "firebase-admin";
+import { REGION } from "./config.js";
 
 if (!admin.apps.length) {
   admin.initializeApp();
 }
 
-const REGION = "us-central1";
 const batteriesRef = () => admin.database().ref("batteries");
 const generatorsRef = () => admin.database().ref("generators");
 
@@ -116,3 +116,4 @@ export const replaceBattery = onCall({ region: REGION }, async (req) => {
 
   return { ok: true };
 });
+
