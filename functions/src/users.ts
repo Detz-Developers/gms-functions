@@ -33,7 +33,7 @@ export const createUserProfile = onCall({ region: REGION }, async (req) => {
     role,
     status: "active",
     createdAt: now,
-    updatedAt: now
+    updatedAt: now,
   });
 
   await admin.auth().setCustomUserClaims(uid, { role });
@@ -64,3 +64,26 @@ export const setUserStatus = onCall({ region: REGION }, async (req) => {
   return { ok: true };
 });
 
+// Delete user
+export const deleteUserAccount = onCall({ region: REGION }, async (req) => {
+  assertAdmin(req);
+  const { uid } = req.data || {};
+  if (!uid) {
+    throw new HttpsError("invalid-argument", "uid required.");
+  }
+
+  await Promise.all([
+    usersRef().child(uid).remove(),
+    admin
+      .auth()
+      .deleteUser(uid)
+      .catch((err: any) => {
+        if (err?.code === "auth/user-not-found") {
+          return null;
+        }
+        throw err;
+      }),
+  ]);
+
+  return { ok: true };
+});
