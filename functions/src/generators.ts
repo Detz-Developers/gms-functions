@@ -1,12 +1,12 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as db from "firebase-functions/v2/database";
 import admin from "firebase-admin";
+import { REGION } from "./config.js";
 
 if (!admin.apps.length) {
   admin.initializeApp();
 }
 
-const REGION = "us-central1";
 const generatorsRef = () => admin.database().ref("generators");
 
 // Helper: only admins can create/update
@@ -111,3 +111,4 @@ export const setGeneratorStatus = onCall({ region: REGION }, async (req) => {
   await generatorsRef().child(id).child("updatedAt").set(Date.now());
   return { ok: true };
 });
+

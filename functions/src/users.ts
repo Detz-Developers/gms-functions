@@ -1,12 +1,11 @@
-
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import admin from "firebase-admin";
+import { REGION } from "./config.js";
 
 if (!admin.apps.length) {
   admin.initializeApp();
 }
 
-const REGION = "us-central1";
 const usersRef = () => admin.database().ref("users");
 
 // Check admin role
@@ -62,5 +61,29 @@ export const setUserStatus = onCall({ region: REGION }, async (req) => {
 
   await admin.auth().updateUser(uid, { disabled });
   await usersRef().child(uid).child("status").set(disabled ? "disabled" : "active");
+  return { ok: true };
+});
+
+// Delete user
+export const deleteUserAccount = onCall({ region: REGION }, async (req) => {
+  assertAdmin(req);
+  const { uid } = req.data || {};
+  if (!uid) {
+    throw new HttpsError("invalid-argument", "uid required.");
+  }
+
+  await Promise.all([
+    usersRef().child(uid).remove(),
+    admin
+      .auth()
+      .deleteUser(uid)
+      .catch((err: any) => {
+        if (err?.code === "auth/user-not-found") {
+          return null;
+        }
+        throw err;
+      }),
+  ]);
+
   return { ok: true };
 });

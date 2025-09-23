@@ -1,4 +1,5 @@
 import admin from "firebase-admin";
+import "./config.js";
 
 // Initialize Firebase Admin SDK once
 if (!admin.apps.length) {
@@ -16,3 +17,4 @@ export * from "./issues.js";
 export * from "./invoices.js";
 export * from "./notifications.js";
 export * from "./reports.js";
+
