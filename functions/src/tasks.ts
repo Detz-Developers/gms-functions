@@ -1,4 +1,4 @@
-import { onCall, HttpsError } from "firebase-functions/v2/https";
+﻿import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as db from "firebase-functions/v2/database";
 import admin from "firebase-admin";
 import { REGION } from "./config.js";
@@ -148,7 +148,10 @@ const assertAdminOrOperator = (ctx: any) => {
  * @param {NotificationPayload} payload - Notification content to store.
  * @returns {{ id: string; saved: NotificationPayload }} - Saved notification id and payload.
  */
-async function pushNotification(uid: string, payload: NotificationPayload): Promise<{ id: string; saved: NotificationPayload }> {
+async function pushNotification(
+  uid: string,
+  payload: NotificationPayload
+): Promise<{ id: string; saved: NotificationPayload }> {
   if (!uid) throw new Error("Missing uid for notification");
   const ref = notificationsRef(uid).push();
   const toSave = { ...payload, createdAt: payload.createdAt || Date.now(), read: false };
@@ -204,7 +207,7 @@ export const deleteTaskSafe = onCall({ region: REGION }, async (req) => {
   if (task?.assigned_to) {
     await pushNotification(task.assigned_to, {
       title: "Task Deleted",
-      body: task.title ? `Task “${task.title}” was deleted` : `Task ${id} was deleted`,
+      body: task.title ? `Task "${task.title}" was deleted` : `Task ${id} was deleted`,
       createdAt: Date.now(),
       read: false,
       related: { taskId: id, generatorId: task.generator_id || null, shopId: task.shop_id || null },
@@ -238,7 +241,7 @@ export const onTaskCreatedNotify = db.onValueCreated({ region: REGION, ref: "/ta
   if (task?.assigned_to) {
     await pushNotification(task.assigned_to, {
       title: "New Task Assigned",
-      body: task.title ? `You were assigned: “${task.title}”` : `A new task (${taskId}) was assigned to you`,
+      body: task.title ? `You were assigned: "${task.title}"` : `A new task (${taskId}) was assigned to you`,
       createdAt: Date.now(),
       read: false,
       related: { taskId, generatorId: task.generator_id || null, shopId: task.shop_id || null },
@@ -262,7 +265,7 @@ export const onTaskUpdatedNotify = db.onValueUpdated({ region: REGION, ref: "/ta
     notifyTargets.push({
       uid: after.assigned_to,
       body: after.title
-        ? `Status changed to ${after.status} for “${after.title}”`
+        ? `Status changed to ${after.status} for "${after.title}"`
         : `Task ${taskId} status changed to ${after.status}`
     });
   }
@@ -271,7 +274,7 @@ export const onTaskUpdatedNotify = db.onValueUpdated({ region: REGION, ref: "/ta
     notifyTargets.push({
       uid: after.assigned_to,
       body: after.title
-        ? `You were assigned: “${after.title}”`
+        ? `You were assigned: "${after.title}"`
         : `You were assigned task ${taskId}`
     });
   }
@@ -289,5 +292,4 @@ export const onTaskUpdatedNotify = db.onValueUpdated({ region: REGION, ref: "/ta
     )
   );
 });
-
 

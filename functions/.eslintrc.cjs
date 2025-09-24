@@ -1,3 +1,5 @@
+// @ts-nocheck
+/* eslint-env node */
 module.exports = {
   root: true,
   env: {

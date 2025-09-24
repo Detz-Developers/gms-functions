@@ -1,0 +1,35 @@
+{
+  // Use the workspace TypeScript SDK from functions/node_modules
+  "typescript.tsdk": "functions/node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+
+  // Ensure ESLint uses the functions directory as cwd and validates TS files
+  "eslint.workingDirectories": [
+    {
+      "directory": "functions",
+      "changeProcessCWD": true
+    }
+  ],
+  "eslint.validate": [
+    "javascript",
+    "javascriptreact",
+    "typescript",
+    "typescriptreact"
+  ],
+
+  // Optional quality-of-life
+  "editor.codeActionsOnSave": {
+    // Run fixers only when explicitly triggered (safe default)
+    "source.fixAll.eslint": "explicit"
+  },
+  "files.exclude": {
+    "functions/lib": true
+  },
+  "search.exclude": {
+    "functions/lib": true
+  },
+  "files.watcherExclude": {
+    "**/functions/lib/**": true
+  }
+}
+
