@@ -20,7 +20,6 @@ export interface LineItem {
 
 export interface Invoice {
   id: string; // manual (admin provided)
-  shop_id?: string | null; // optional linkage
   date: number; // ms epoch
   line_items: LineItem[];
   amount: number; // computed or override
@@ -79,7 +78,6 @@ export const createInvoice = onCall({ region: REGION }, async (req) => {
 
   const {
     id,
-    shop_id,
     date,
     line_items = [],
     due_date = null,
@@ -105,7 +103,6 @@ export const createInvoice = onCall({ region: REGION }, async (req) => {
   const now = Date.now();
   const invoice: Invoice = {
     id,
-    shop_id: shop_id ?? null,
     date: typeof date === "number" ? date : now,
     line_items: Array.isArray(line_items) ? line_items : [],
     amount,
@@ -134,7 +131,6 @@ export const updateInvoice = onCall({ region: REGION }, async (req) => {
     due_date,
     line_items,
     amount, // override
-    shop_id,
     date
   } = req.data || {};
 
@@ -153,7 +149,6 @@ export const updateInvoice = onCall({ region: REGION }, async (req) => {
   if (typeof description === "string") updates.description = description;
   if (typeof company_name === "string") updates.company_name = company_name;
   if (due_date === null || typeof due_date === "number") updates.due_date = due_date;
-  if (typeof shop_id === "string" || shop_id === null) updates.shop_id = shop_id;
   if (typeof date === "number") updates.date = date;
 
   if (Array.isArray(line_items)) {
@@ -272,13 +267,12 @@ export const getInvoice = onCall({ region: REGION }, async (req) => {
 
 export const listInvoices = onCall({ region: REGION }, async (req) => {
   assertAdmin(req);
-  const { limit = 100, status, shop_id } = req.data || {};
+  const { limit = 100, status } = req.data || {};
   const snap = await invoicesRef().limitToLast(Math.min(500, limit)).get();
   const out: Invoice[] = [];
   snap.forEach((child) => {
     const inv = child.val() as Invoice;
     if (status && inv.status !== status) return;
-    if (shop_id !== undefined && inv.shop_id !== shop_id) return;
     out.push(inv);
   });
   // sort desc by date
