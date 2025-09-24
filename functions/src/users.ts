@@ -33,7 +33,7 @@ export const createUserProfile = onCall({ region: REGION }, async (req) => {
     role,
     status: "active",
     createdAt: now,
-    updatedAt: now,
+    updatedAt: now
   });
 
   await admin.auth().setCustomUserClaims(uid, { role });
@@ -82,7 +82,7 @@ export const deleteUserAccount = onCall({ region: REGION }, async (req) => {
           return null;
         }
         throw err;
-      }),
+      })
   ]);
 
   return { ok: true };

@@ -20,6 +20,8 @@ module.exports = {
   ignorePatterns: [
     "/lib/**/*", // Ignore built files.
     "/generated/**/*", // Ignore generated files.
+    "/cypress/**/*", // Ignore Cypress tests for functions build/lint
+    "cypress.config.ts" // Ignore Cypress config from lint
   ],
   plugins: [
     "@typescript-eslint",
