@@ -3,17 +3,11 @@ import { onCall } from "firebase-functions/v2/https";
 import * as db from "firebase-functions/v2/database";
 import admin from "firebase-admin";
 
-// Make sure admin is initialized once in your project entrypoint.
-// If not, uncomment below:
-// if (!admin.apps.length) admin.initializeApp();
-
 const rtdb = () => admin.database();
 const GENERATORS_REF = "/generators";
 const GENERATOR_COUNTER_REF = "/meta/generators/nextId";
 
-// ────────────────────────────────────────────────────────────────
 // Types & constants
-// ────────────────────────────────────────────────────────────────
 
 type Status = "ACTIVE" | "REPAIR" | "UNUSABLE";
 type Location = "UP" | "DOWN";
@@ -22,29 +16,26 @@ const ALLOWED_STATUS: Status[] = ["ACTIVE", "REPAIR", "UNUSABLE"];
 const ALLOWED_LOCATION: Location[] = ["UP", "DOWN"];
 
 export interface Generator {
-  id?: string; // human-readable id e.g. G00001
-  serialNumber: string; // primary key (node key)
+  id: string; // primary key, e.g. G00001
+  serialNumber?: string;
   brand?: string;
-  sizeKw?: number; // capacity in kW
+  sizeKw?: number;
   shopId?: string;
-  status: Status; // ACTIVE | REPAIR | UNUSABLE
-  location: Location; // UP | DOWN
+  status: Status;
+  location: Location;
   hasBatteryCharger?: boolean;
   hasAutoStart?: boolean;
-  issuedDate?: number | null; // ms epoch
-  installedDate?: number | null; // ms epoch
-  warrantyExpiryDate?: number | null; // ms epoch
-  createdAt?: number; // server timestamp
-  updatedAt?: number; // server timestamp
+  issuedDate?: number | null;
+  installedDate?: number | null;
+  warrantyExpiryDate?: number | null;
+  createdAt?: number;
+  updatedAt?: number;
 }
 
-// ────────────────────────────────────────────────────────────────
 // Helpers
-// ────────────────────────────────────────────────────────────────
 
 function isAdmin(ctx: any): boolean {
   const token = ctx?.auth?.token;
-  // supports either { admin: true } or { role: "admin" }
   return token?.admin === true || token?.role === "admin";
 }
 
@@ -58,18 +49,12 @@ function assert(condition: any, message: string): asserts condition {
 
 function validateStatus(status?: any): asserts status is Status {
   if (status === undefined) return;
-  assert(
-    ALLOWED_STATUS.includes(status),
-    `Invalid status. Allowed: ${ALLOWED_STATUS.join(", ")}`
-  );
+  assert(ALLOWED_STATUS.includes(status), `Invalid status. Allowed: ${ALLOWED_STATUS.join(", ")}`);
 }
 
 function validateLocation(location?: any): asserts location is Location {
   if (location === undefined) return;
-  assert(
-    ALLOWED_LOCATION.includes(location),
-    `Invalid location. Allowed: ${ALLOWED_LOCATION.join(", ")}`
-  );
+  assert(ALLOWED_LOCATION.includes(location), `Invalid location. Allowed: ${ALLOWED_LOCATION.join(", ")}`);
 }
 
 const DATE_FIELDS = ["issuedDate", "installedDate", "warrantyExpiryDate"] as const;
@@ -77,9 +62,8 @@ const DATE_FIELDS = ["issuedDate", "installedDate", "warrantyExpiryDate"] as con
 function coerceDate(val: any): number | null | undefined {
   if (val === undefined) return undefined;
   if (val === null || val === "") return null;
-  // accept number-like strings or numbers (epoch ms)
   const n = typeof val === "string" ? Number(val) : val;
-  assert(!Number.isNaN(n) && Number.isFinite(n), "Date fields must be ms epoch number (or null).");
+  assert(!Number.isNaN(n) && Number.isFinite(n), "Date fields must be ms epoch (or null).");
   return n;
 }
 
@@ -114,108 +98,44 @@ function formatGeneratorId(n: number): string {
 async function allocateGeneratorId(): Promise<string> {
   const ref = rtdb().ref(GENERATOR_COUNTER_REF);
   const res = await ref.transaction((cur) => (typeof cur === "number" ? cur + 1 : 1));
-  if (!res.committed) {
-    // Fallback: try once more
-    const res2 = await ref.transaction((cur) => (typeof cur === "number" ? cur + 1 : 1));
-    const n2 = Number(res2.snapshot?.val() ?? 1);
-    return formatGeneratorId(n2);
-  }
   const n = Number(res.snapshot?.val() ?? 1);
   return formatGeneratorId(n);
 }
 
-/**
- * Shallow compare objects ignoring createdAt/updatedAt.
- */
-function isOnlyMetaChanged(before: any, after: any): boolean {
-  const ignore = new Set(["createdAt", "updatedAt"]);
-  const keys = new Set([...Object.keys(before || {}), ...Object.keys(after || {})]);
-  for (const k of keys) {
-    if (ignore.has(k)) continue;
-    const a = before?.[k];
-    const b = after?.[k];
-    const bothObjects = typeof a === "object" && typeof b === "object";
-    if (bothObjects) {
-      // shallow compare only
-      if (JSON.stringify(a) !== JSON.stringify(b)) return false;
-    } else if (a !== b) {
-      return false;
-    }
-  }
-  return true;
-}
+// RTDB Trigger
 
-// ────────────────────────────────────────────────────────────────
-/**
- * RTDB Trigger:
- * - Ensure createdAt is set on first write
- * - Always bump updatedAt on meaningful changes
- * - Avoid infinite loops by skipping if only meta changed
- */
 export const onGeneratorUpdate = db.onValueWritten(
-  { ref: `${GENERATORS_REF}/{serialNumber}` },
+  { ref: `${GENERATORS_REF}/{id}` },
   async (event) => {
-    const before = event.data?.before?.val() ?? null;
     const after = event.data?.after?.val() ?? null;
-
-    // Deleted
     if (after === null) return;
 
     const updates: Record<string, any> = {};
-
-    // Set createdAt once
-    if (!after.createdAt) {
-      updates["createdAt"] = admin.database.ServerValue.TIMESTAMP;
-    }
-
-    // If only meta changed (createdAt/updatedAt), do nothing further
-    if (isOnlyMetaChanged(before, after)) {
-      // If we set createdAt above, we still need to write it
-      if (Object.keys(updates).length > 0) {
-        updates["updatedAt"] = admin.database.ServerValue.TIMESTAMP;
-        await event.data.after.ref.update(updates);
-      }
-      return;
-    }
-
-    // Otherwise, bump updatedAt on meaningful changes
+    if (!after.createdAt) updates["createdAt"] = admin.database.ServerValue.TIMESTAMP;
     updates["updatedAt"] = admin.database.ServerValue.TIMESTAMP;
 
     await event.data.after.ref.update(updates);
   }
 );
 
-// ────────────────────────────────────────────────────────────────
 // Callables
-// ────────────────────────────────────────────────────────────────
 
-/**
- * createGenerator (admin-only)
- * Input: {
- *   serialNumber: string,  // node key (required)
- *   brand?, sizeKw?, shopId?,
- *   status,                // ACTIVE | REPAIR | UNUSABLE
- *   location,              // UP | DOWN
- *   hasBatteryCharger?, hasAutoStart?,
- *   issuedDate?, installedDate?, warrantyExpiryDate?
- * }
- */
 export const createGenerator = onCall(async (req) => {
   if (!isAdmin(req)) {
-    const err: any = new Error("Permission denied. Admins only.");
+    const err: any = new Error("Permission denied.");
     err.code = "permission-denied";
     throw err;
   }
 
   const payload = req.data ?? {};
-  const serialNumber = (payload.serialNumber ?? "").trim();
-  assert(serialNumber, "serialNumber is required and must be a non-empty string.");
-
   validateStatus(payload.status);
   validateLocation(payload.location);
 
+  const id = await allocateGeneratorId();
+
   const data: Partial<Generator> = {
-    serialNumber,
+    id,
+    serialNumber: payload.serialNumber?.trim(),
     brand: payload.brand?.trim(),
     sizeKw: payload.sizeKw !== undefined ? Number(payload.sizeKw) : undefined,
     shopId: payload.shopId?.trim(),
@@ -229,39 +149,23 @@ export const createGenerator = onCall(async (req) => {
   };
 
   const normalized = normalizeDates(stripUndefined(data));
+  await rtdb().ref(`${GENERATORS_REF}/${id}`).set(normalized);
 
-  // Ensure the node does not already exist
-  const ref = rtdb().ref(`${GENERATORS_REF}/${serialNumber}`);
-  const snap = await ref.get();
-  assert(!snap.exists(), `Generator with serialNumber '${serialNumber}' already exists.`);
-
-  // Allocate human-readable id and write (createdAt/updatedAt handled by trigger)
-  const id = await allocateGeneratorId();
-  await ref.set({ ...normalized, id });
-
-  return { ok: true, serialNumber };
+  return { ok: true, id };
 });
 
-/**
- * updateGenerator (admin-only)
- * Input: {
- *   serialNumber: string, // required
- *   ...patch              // any writable fields
- * }
- */
 export const updateGenerator = onCall(async (req) => {
   if (!isAdmin(req)) {
-    const err: any = new Error("Permission denied. Admins only.");
+    const err: any = new Error("Permission denied.");
     err.code = "permission-denied";
     throw err;
   }
 
   const payload = req.data ?? {};
-  const serialNumber = (payload.serialNumber ?? "").trim();
-  assert(serialNumber, "serialNumber is required.");
+  const id = (payload.id ?? "").trim();
+  assert(id, "id is required.");
 
-  // Make a copy and remove serialNumber from patch
-  const { serialNumber: _omit, createdAt: _c, updatedAt: _u, id: _id, model: _m, ...patch } = payload;
+  const { id: _id, createdAt: _c, updatedAt: _u, ...patch } = payload;
 
   if (patch.status !== undefined) validateStatus(patch.status);
   if (patch.location !== undefined) validateLocation(patch.location);
@@ -270,47 +174,36 @@ export const updateGenerator = onCall(async (req) => {
 
   const normalized = normalizeDates(stripUndefined(patch));
 
-  const ref = rtdb().ref(`${GENERATORS_REF}/${serialNumber}`);
+  const ref = rtdb().ref(`${GENERATORS_REF}/${id}`);
   const snap = await ref.get();
-  assert(snap.exists(), `Generator '${serialNumber}' not found.`);
+  assert(snap.exists(), `Generator '${id}' not found.`);
 
-  await ref.update(normalized); // updatedAt bumped by trigger
-
+  await ref.update(normalized);
   return { ok: true };
 });
 
-/**
- * setGeneratorStatus (admin-only)
- * Input: { serialNumber: string, status: Status }
- */
 export const setGeneratorStatus = onCall(async (req) => {
   if (!isAdmin(req)) {
-    const err: any = new Error("Permission denied. Admins only.");
+    const err: any = new Error("Permission denied.");
     err.code = "permission-denied";
     throw err;
   }
 
-  const serialNumber = (req.data?.serialNumber ?? "").trim();
+  const id = (req.data?.id ?? "").trim();
   const status = req.data?.status;
-  assert(serialNumber, "serialNumber is required.");
+  assert(id, "id is required.");
   validateStatus(status);
 
-  const ref = rtdb().ref(`${GENERATORS_REF}/${serialNumber}`);
+  const ref = rtdb().ref(`${GENERATORS_REF}/${id}`);
   const snap = await ref.get();
-  assert(snap.exists(), `Generator '${serialNumber}' not found.`);
+  assert(snap.exists(), `Generator '${id}' not found.`);
 
-  await ref.update({ status }); // updatedAt bumped by trigger
+  await ref.update({ status });
   return { ok: true };
 });
 
-/**
- * listGenerators (read)
- * Input (optional): { limit?: number, status?: Status, location?: Location, shopId?: string }
- */
 export const listGenerators = onCall(async (req) => {
-  // If you need to restrict read access, add a role check here
   const { limit, status, location, shopId } = req.data ?? {};
-
   if (status !== undefined) validateStatus(status);
   if (location !== undefined) validateLocation(location);
 
@@ -325,46 +218,37 @@ export const listGenerators = onCall(async (req) => {
   const lim = typeof limit === "number" && limit > 0 ? limit : undefined;
   if (lim) items = items.slice(0, lim);
 
-  // Sort newest updated first, fallback to createdAt, else name
   items.sort((a, b) => {
     const au = a.updatedAt ?? a.createdAt ?? 0;
     const bu = b.updatedAt ?? b.createdAt ?? 0;
-    return bu - au || String(a.serialNumber).localeCompare(String(b.serialNumber));
+    return bu - au || String(a.id).localeCompare(String(b.id));
   });
 
   return { ok: true, items };
 });
 
-/**
- * getGenerator (read)
- * Input: { serialNumber: string }
- */
 export const getGenerator = onCall(async (req) => {
-  const serialNumber = (req.data?.serialNumber ?? "").trim();
-  assert(serialNumber, "serialNumber is required.");
+  const id = (req.data?.id ?? "").trim();
+  assert(id, "id is required.");
 
-  const snap = await rtdb().ref(`${GENERATORS_REF}/${serialNumber}`).get();
-  assert(snap.exists(), `Generator '${serialNumber}' not found.`);
+  const snap = await rtdb().ref(`${GENERATORS_REF}/${id}`).get();
+  assert(snap.exists(), `Generator '${id}' not found.`);
   return { ok: true, item: snap.val() as Generator };
 });
 
-/**
- * deleteGenerator (admin-only)
- * Input: { serialNumber: string }
- */
 export const deleteGenerator = onCall(async (req) => {
   if (!isAdmin(req)) {
-    const err: any = new Error("Permission denied. Admins only.");
+    const err: any = new Error("Permission denied.");
     err.code = "permission-denied";
     throw err;
   }
 
-  const serialNumber = (req.data?.serialNumber ?? "").trim();
-  assert(serialNumber, "serialNumber is required.");
+  const id = (req.data?.id ?? "").trim();
+  assert(id, "id is required.");
 
-  const ref = rtdb().ref(`${GENERATORS_REF}/${serialNumber}`);
+  const ref = rtdb().ref(`${GENERATORS_REF}/${id}`);
   const snap = await ref.get();
-  assert(snap.exists(), `Generator '${serialNumber}' not found.`);
+  assert(snap.exists(), `Generator '${id}' not found.`);
 
   await ref.remove();
   return { ok: true };
