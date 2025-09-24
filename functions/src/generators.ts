@@ -9,6 +9,7 @@ import admin from "firebase-admin";
 
 const rtdb = () => admin.database();
 const GENERATORS_REF = "/generators";
+const GENERATOR_COUNTER_REF = "/meta/generators/nextId";
 
 // ────────────────────────────────────────────────────────────────
 // Types & constants
@@ -21,9 +22,9 @@ const ALLOWED_STATUS: Status[] = ["ACTIVE", "REPAIR", "UNUSABLE"];
 const ALLOWED_LOCATION: Location[] = ["UP", "DOWN"];
 
 export interface Generator {
+  id?: string; // human-readable id e.g. G00001
   serialNumber: string; // primary key (node key)
   brand?: string;
-  model?: string;
   sizeKw?: number; // capacity in kW
   shopId?: string;
   status: Status; // ACTIVE | REPAIR | UNUSABLE
@@ -106,6 +107,23 @@ function stripUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
   return out;
 }
 
+function formatGeneratorId(n: number): string {
+  return `G${String(n).padStart(5, "0")}`;
+}
+
+async function allocateGeneratorId(): Promise<string> {
+  const ref = rtdb().ref(GENERATOR_COUNTER_REF);
+  const res = await ref.transaction((cur) => (typeof cur === "number" ? cur + 1 : 1));
+  if (!res.committed) {
+    // Fallback: try once more
+    const res2 = await ref.transaction((cur) => (typeof cur === "number" ? cur + 1 : 1));
+    const n2 = Number(res2.snapshot?.val() ?? 1);
+    return formatGeneratorId(n2);
+  }
+  const n = Number(res.snapshot?.val() ?? 1);
+  return formatGeneratorId(n);
+}
+
 /**
  * Shallow compare objects ignoring createdAt/updatedAt.
  */
@@ -175,7 +193,7 @@ export const onGeneratorUpdate = db.onValueWritten(
  * createGenerator (admin-only)
  * Input: {
  *   serialNumber: string,  // node key (required)
- *   brand?, model?, sizeKw?, shopId?,
+ *   brand?, sizeKw?, shopId?,
  *   status,                // ACTIVE | REPAIR | UNUSABLE
  *   location,              // UP | DOWN
  *   hasBatteryCharger?, hasAutoStart?,
@@ -199,7 +217,6 @@ export const createGenerator = onCall(async (req) => {
   const data: Partial<Generator> = {
     serialNumber,
     brand: payload.brand?.trim(),
-    model: payload.model?.trim(),
     sizeKw: payload.sizeKw !== undefined ? Number(payload.sizeKw) : undefined,
     shopId: payload.shopId?.trim(),
     status: payload.status,
@@ -218,8 +235,9 @@ export const createGenerator = onCall(async (req) => {
   const snap = await ref.get();
   assert(!snap.exists(), `Generator with serialNumber '${serialNumber}' already exists.`);
 
-  // Write (createdAt/updatedAt handled by trigger)
-  await ref.set(normalized);
+  // Allocate human-readable id and write (createdAt/updatedAt handled by trigger)
+  const id = await allocateGeneratorId();
+  await ref.set({ ...normalized, id });
 
   return { ok: true, serialNumber };
 });
@@ -243,7 +261,7 @@ export const updateGenerator = onCall(async (req) => {
   assert(serialNumber, "serialNumber is required.");
 
   // Make a copy and remove serialNumber from patch
-  const { serialNumber: _omit, createdAt: _c, updatedAt: _u, ...patch } = payload;
+  const { serialNumber: _omit, createdAt: _c, updatedAt: _u, id: _id, model: _m, ...patch } = payload;
 
   if (patch.status !== undefined) validateStatus(patch.status);
   if (patch.location !== undefined) validateLocation(patch.location);
