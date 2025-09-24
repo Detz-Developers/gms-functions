@@ -37,7 +37,10 @@ module.exports = {
     "@typescript-eslint/no-explicit-any": "off", // (or "warn")
     "indent": ["error", 2],
     "quotes": ["error", "double"],
-    "import/no-unresolved": 0
+    "import/no-unresolved": 0,
+    "operator-linebreak": "off",
+    "require-jsdoc": "off",
+    "valid-jsdoc": "off"
   },
 };
 
