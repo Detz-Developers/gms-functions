@@ -101,7 +101,6 @@ export const setTaskStatus = onCall({ region: REGION }, async (req) => {
 
 // Extra refs
 const usersRef = () => admin.database().ref("users");
-const generatorsRef = () => admin.database().ref("generators");
 const notificationsRef = (uid: string) => admin.database().ref(`notifications/${uid}`);
 
 // Types
@@ -216,14 +215,7 @@ export const deleteTaskSafe = onCall({ region: REGION }, async (req) => {
   return { ok: true };
 });
 
-// List all generators (id + data)
-export const listGenerators = onCall({ region: REGION }, async (req) => {
-  requireAuth(req);
-  const snap = await generatorsRef().get();
-  const val = snap.val() || {};
-  const list = Object.entries(val).map(([id, data]) => ({ id, ...(data as any) }));
-  return { ok: true, count: list.length, generators: list };
-});
+// (Moved) listGenerators is implemented in generators.ts to avoid duplicate exports.
 
 // List active technicians (role === technician && status === active)
 export const listTechnicians = onCall({ region: REGION }, async (req) => {
