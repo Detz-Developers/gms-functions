@@ -1,3 +1,5 @@
+// @ts-nocheck
+/* eslint-env node */
 module.exports = {
   root: true,
   env: {
@@ -20,6 +22,8 @@ module.exports = {
   ignorePatterns: [
     "/lib/**/*", // Ignore built files.
     "/generated/**/*", // Ignore generated files.
+    "/cypress/**/*", // Ignore Cypress tests for functions build/lint
+    "cypress.config.ts" // Ignore Cypress config from lint
   ],
   plugins: [
     "@typescript-eslint",
@@ -35,7 +39,10 @@ module.exports = {
     "@typescript-eslint/no-explicit-any": "off", // (or "warn")
     "indent": ["error", 2],
     "quotes": ["error", "double"],
-    "import/no-unresolved": 0
+    "import/no-unresolved": 0,
+    "operator-linebreak": "off",
+    "require-jsdoc": "off",
+    "valid-jsdoc": "off"
   },
 };
 
