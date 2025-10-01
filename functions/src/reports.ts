@@ -1,90 +1,170 @@
+import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as scheduler from "firebase-functions/v2/scheduler";
+import * as logger from "firebase-functions/logger";
 import admin from "firebase-admin";
 import { REGION } from "./config.js";
 
 if (!admin.apps.length) {
   admin.initializeApp();
 }
+const db = admin.database();
 
+const GEMINI_URL =
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
-// Scheduled function: generate monthly summary report
-export const generateMonthlyReport = scheduler.onSchedule(
-  {
-    schedule: "0 0 1 * *", // every 1st of the month at midnight
-    region: REGION,
-    timeZone: "Asia/Colombo"
-  },
+interface GeminiResponse {
+  candidates?: {
+    content?: {
+      parts?: { text?: string }[];
+    };
+  }[];
+}
+
+function getGeminiApiKey(): string {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY is not set. Please add it to your environment.");
+  }
+  return apiKey;
+}
+
+async function callGemini(prompt: string): Promise<string> {
+  try {
+    const apiKey = getGeminiApiKey();
+    const response = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }]
+      })
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      logger.error("Gemini API returned a non-success status", {
+        status: response.status,
+        errorBody
+      });
+      return "Gemini API returned an error.";
+    }
+
+    const data = (await response.json()) as GeminiResponse;
+    return (
+      data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+      "No content generated"
+    );
+  } catch (err) {
+    logger.error("Error calling Gemini", err);
+    if (err instanceof Error && err.message.includes("GEMINI_API_KEY")) {
+      return "Gemini API key is not configured.";
+    }
+    return "Error occurred while generating report.";
+  }
+}
+
+/**
+ * Callable Function: Generate Report (on-demand from frontend)
+ * request.data = { reportType: "summary" | "maintenance" }
+ */
+export const generateReport = onCall({ region: REGION }, async (request) => {
+  const { reportType } = request.data || {};
+  if (!reportType) {
+    throw new HttpsError("invalid-argument", "reportType is required.");
+  }
+
+  const snapshot = await db.ref("/").once("value");
+  const dbData = snapshot.val() || {};
+
+  let inputData: Record<string, unknown>;
+  let prompt: string;
+
+  if (reportType === "summary") {
+    inputData = {
+      batteries: dbData.batteries || {},
+      generators: dbData.generators || {},
+      issues: dbData.issues ? Object.values(dbData.issues).slice(0, 10) : [],
+      services: dbData.services ? Object.values(dbData.services).slice(0, 10) : [],
+      tasks: dbData.tasks ? Object.values(dbData.tasks).slice(0, 10) : []
+    };
+    prompt = `Generate an AI Summary Report:\n${JSON.stringify(inputData, null, 2)}`;
+  } else if (reportType === "maintenance") {
+    inputData = {
+      issues: dbData.issues || {},
+      services: dbData.services || {},
+      tasks: dbData.tasks || {}
+    };
+    prompt = `Generate a Maintenance & Issues Report:\n${JSON.stringify(inputData, null, 2)}`;
+  } else {
+    throw new HttpsError("invalid-argument", "Invalid reportType provided.");
+  }
+
+  const report = await callGemini(prompt);
+
+  const now = Date.now();
+  const reportRef = db.ref("reports").push();
+  await reportRef.set({
+    type: reportType,
+    content: report,
+    createdAt: now
+  });
+
+  return { ok: true, report, id: reportRef.key };
+});
+
+/**
+ * Scheduled function: AI Summary Report (runs automatically every 24h)
+ */
+export const aiSummaryReport = scheduler.onSchedule(
+  { schedule: "every 24 hours", region: REGION },
   async () => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth(); // 0-based
-    const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
+    const snapshot = await db.ref("/").once("value");
+    const dbData = snapshot.val() || {};
 
-    const db = admin.database();
-
-    const [gensSnap, tasksSnap, issuesSnap, invoicesSnap] = await Promise.all([
-      db.ref("generators").get(),
-      db.ref("tasks").get(),
-      db.ref("issues").get(),
-      db.ref("invoices").get()
-    ]);
-
-    const generators = gensSnap.exists() ? Object.values(gensSnap.val()) : [];
-    const tasks = tasksSnap.exists() ? Object.values(tasksSnap.val()) : [];
-    const issues = issuesSnap.exists() ? Object.values(issuesSnap.val()) : [];
-    const invoices = invoicesSnap.exists() ? Object.values(invoicesSnap.val()) : [];
-
-    // Compute stats
-    const stats = {
-      totalGenerators: (generators as any[]).length,
-      activeGenerators: (generators as any[]).filter((g) => g["status"] === "Active").length,
-      tasksCompleted: (tasks as any[]).filter((t) => t["status"] === "Completed").length,
-      tasksPending: (tasks as any[]).filter((t) => t["status"] === "Pending").length,
-      openIssues: (issues as any[]).filter((i) => i["status"] === "open").length,
-      invoicesPaid: (invoices as any[]).filter((inv) => inv["status"] === "Paid").length,
-      invoicesPending: (invoices as any[]).filter((inv) => inv["status"] === "Pending").length,
-      generatedAt: Date.now()
+    const inputData = {
+      batteries: dbData.batteries || {},
+      generators: dbData.generators || {},
+      issues: dbData.issues ? Object.values(dbData.issues).slice(0, 10) : [],
+      services: dbData.services ? Object.values(dbData.services).slice(0, 10) : [],
+      tasks: dbData.tasks ? Object.values(dbData.tasks).slice(0, 10) : []
     };
 
-    await db.ref(`reports/monthly/${monthKey}`).set(stats);
-    return;
+    const prompt = `Generate an AI Summary Report:\n${JSON.stringify(inputData, null, 2)}`;
+    const report = await callGemini(prompt);
+
+    await db.ref("reports").push({
+      type: "summary",
+      content: report,
+      createdAt: Date.now()
+    });
+
+    logger.info("Scheduled AI Summary Report generated.");
   }
 );
 
-// Scheduled function: daily summary (for dashboard quick view)
-export const generateDailyReport = scheduler.onSchedule(
-  {
-    schedule: "0 0 * * *", // every day midnight
-    region: REGION,
-    timeZone: "Asia/Colombo"
-  },
+/**
+ * Scheduled function: AI Maintenance Report (runs automatically every 24h)
+ */
+export const aiMaintenanceReport = scheduler.onSchedule(
+  { schedule: "every 24 hours", region: REGION },
   async () => {
-    const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+    const snapshot = await db.ref("/").once("value");
+    const dbData = snapshot.val() || {};
 
-    const db = admin.database();
-    const [tasksSnap, issuesSnap] = await Promise.all([
-      db.ref("tasks").get(),
-      db.ref("issues").get()
-    ]);
-
-    const tasks = tasksSnap.exists() ? Object.values(tasksSnap.val()) : [];
-    const issues = issuesSnap.exists() ? Object.values(issuesSnap.val()) : [];
-
-    const stats = {
-      tasksDueToday: (tasks as any[]).filter((t) => {
-        if (!t["due_date"]) return false;
-        const due = new Date(t["due_date"]).toISOString().split("T")[0];
-        return due === today;
-      }).length,
-      newIssues: (issues as any[]).filter((i) => {
-        const created = new Date(i["createdAt"]).toISOString().split("T")[0];
-        return created === today;
-      }).length,
-      generatedAt: Date.now()
+    const inputData = {
+      issues: dbData.issues || {},
+      services: dbData.services || {},
+      tasks: dbData.tasks || {}
     };
 
-    await db.ref(`reports/daily/${today}`).set(stats);
-    return;
+    const prompt = `Generate a Maintenance & Issues Report:\n${JSON.stringify(inputData, null, 2)}`;
+    const report = await callGemini(prompt);
+
+    await db.ref("reports").push({
+      type: "maintenance",
+      content: report,
+      createdAt: Date.now()
+    });
+
+    logger.info("Scheduled AI Maintenance Report generated.");
   }
 );
-

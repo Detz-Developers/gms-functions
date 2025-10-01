@@ -1,3 +1,4 @@
+import "dotenv/config";
 import admin from "firebase-admin";
 import "./config.js";
 
@@ -17,4 +18,3 @@ export * from "./issues.js";
 export * from "./invoices.js";
 export * from "./notifications.js";
 export * from "./reports.js";
-
