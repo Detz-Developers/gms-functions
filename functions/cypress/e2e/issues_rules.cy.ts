@@ -45,7 +45,7 @@ describe("Firebase Issues Rules", () => {
     expect(snap.val().id).to.eq(id);
   });
 
-  // ✅ Owner (createdBy = auth.uid) read own → allow
+  // Owner (createdBy = auth.uid) read own → allow
 it("allows owner to read their own issue", async () => {
   const userCred = await login("tech@gmail.com", "Temp@123");
   const uid = userCred.user.uid;
@@ -65,7 +65,7 @@ it("allows owner to read their own issue", async () => {
   expect(snap.val().createdBy).to.eq(uid);
 });
 
-  // ❌ Others read → deny
+  //  Others read → deny
   it("blocks other users from reading issues they don't own", async () => {
     await login("staff@gmail.com", "Temp@123");
 
@@ -77,7 +77,7 @@ it("allows owner to read their own issue", async () => {
     }
   });
 
-  // ✅ Any authenticated user write → allow
+  //  Any authenticated user write → allow
   it("allows any authenticated user to write issues", async () => {
     await login("tech@gmail.com", "Temp@123");
 
@@ -96,7 +96,7 @@ it("allows owner to read their own issue", async () => {
     expect(snap.val().id).to.eq(id);
   });
 
-  // ❌ Unauthenticated write → deny
+  //  Unauthenticated write → deny
 it("blocks unauthenticated users from writing issues", async () => {
   await signOut(auth); // ✅ logout
 
