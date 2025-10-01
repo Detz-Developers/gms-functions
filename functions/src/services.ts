@@ -3,58 +3,81 @@ import * as db from "firebase-functions/v2/database";
 import admin from "firebase-admin";
 import { REGION } from "./config.js";
 
-if (!admin.apps.length) {
-  admin.initializeApp();
-}
+if (!admin.apps.length) admin.initializeApp();
 
-const serviceLogsRef = () => admin.database().ref("serviceLogs");
-const generatorsRef = () => admin.database().ref("generators");
+const ref = () => admin.database().ref("serviceLogs");
+const genRef = () => admin.database().ref("generators");
 
-// Helpers
-const assertTechnicianOrAdmin = (ctx: any) => {
+const assertTechOrAdmin = (ctx: any) => {
   if (!ctx.auth) throw new HttpsError("unauthenticated", "Sign in required.");
   const role = ctx.auth.token?.role;
   if (role !== "admin" && role !== "technician") {
-    throw new HttpsError("permission-denied", "Admin/Technician only.");
+    throw new HttpsError("permission-denied", "Admin or Technician only.");
   }
 };
 
-// Auto bump updatedAt on service log changes
+const TYPES = ["Maintenance", "Repair", "Emergency Repair"] as const;
+type ServiceType = (typeof TYPES)[number];
+
+const nextId = async (): Promise<string> => {
+  const snap = await ref().once("value");
+  let max = 0;
+  if (snap.exists()) {
+    snap.forEach((c) => {
+      const id: string = (c.val()?.id ?? c.key) as string;
+      const m = /^SVL(\d+)$/.exec(id ?? "");
+      if (m) {
+        const n = parseInt(m[1], 10);
+        if (!Number.isNaN(n)) max = Math.max(max, n);
+      }
+      return false;
+    });
+  }
+  return "SVL" + String(max + 1).padStart(4, "0");
+};
+
 export const onServiceLogUpdate = db.onValueUpdated(
   { ref: "/serviceLogs/{logId}", region: REGION },
   async (event) => {
     const before = event.data.before.val() ?? {};
     const after = event.data.after.val() ?? {};
-
-    const { updatedAt: _b, ...bRest } = before;
-    const { updatedAt: _a, ...aRest } = after;
-
-    if (JSON.stringify(bRest) === JSON.stringify(aRest)) return;
-
-    await event.data.after.ref
-      .child("updatedAt")
-      .set(admin.database.ServerValue.TIMESTAMP);
+    const { updatedAt: _b, ...b } = before;
+    const { updatedAt: _a, ...a } = after;
+    if (JSON.stringify(b) === JSON.stringify(a)) return;
+    await event.data.after.ref.child("updatedAt").set(admin.database.ServerValue.TIMESTAMP);
   }
 );
 
-
-export const logService = onCall({ region: REGION }, async (req) => {
-  assertTechnicianOrAdmin(req);
+export const createServiceLog = onCall({ region: REGION }, async (req) => {
+  assertTechOrAdmin(req);
   const {
-    id,
     generator_id,
     technician_id,
     service_type,
     service_date,
     next_due_date,
     notes
-  } = req.data || {};
+  }: {
+    generator_id?: string;
+    technician_id?: string;
+    service_type?: ServiceType;
+    service_date?: number;
+    next_due_date?: number | null;
+    notes?: string | null;
+  } = req.data ?? {};
 
-  if (!id || !generator_id || !technician_id || !service_type) {
-    throw new HttpsError("invalid-argument", "id, generator_id, technician_id, service_type required.");
+  if (!generator_id) throw new HttpsError("invalid-argument", "generator_id is required.");
+  if (!technician_id) throw new HttpsError("invalid-argument", "technician_id is required.");
+  if (!service_type || !TYPES.includes(service_type)) {
+    throw new HttpsError("invalid-argument", `service_type must be ${TYPES.join(" | ")}`);
   }
 
+  const genSnap = await genRef().child(generator_id).once("value");
+  if (!genSnap.exists()) throw new HttpsError("not-found", `Generator ${generator_id} not found.`);
+
+  const id = await nextId();
   const now = Date.now();
+
   const payload = {
     id,
     generator_id,
@@ -68,241 +91,94 @@ export const logService = onCall({ region: REGION }, async (req) => {
     updatedAt: now
   };
 
-  await serviceLogsRef().child(id).set(payload);
-
-  // Optional: update generator's last_service_date
-  await generatorsRef().child(generator_id).child("last_service_date").set(service_date ?? now);
-
+  await ref().child(id).set(payload);
   return { ok: true, id };
 });
 
-// Callable: mark overdue services (Admin/Technician)
-export const markOverdueServices = onCall({ region: REGION }, async (req) => {
-  assertTechnicianOrAdmin(req);
-
-  const snap = await serviceLogsRef().get();
-  if (!snap.exists()) return { updated: 0 };
-
-  const updates: Record<string, any> = {};
-  const now = Date.now();
-
-  snap.forEach((child) => {
-    const log = child.val();
-    if (log.next_due_date && log.next_due_date < now) {
-      updates[`serviceLogs/${log.id}/overdue`] = true;
-    }
-  });
-
-  if (Object.keys(updates).length) {
-    await admin.database().ref().update(updates);
-  }
-  return { updated: Object.keys(updates).length };
-});
-
-// Callable: get all services for frontend
-export const getServices = onCall({ region: REGION }, async (req) => {
+export const getServiceLog = onCall({ region: REGION }, async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "Sign in required.");
-
-  const snap = await serviceLogsRef().get();
-  if (!snap.exists()) return { services: [] };
-
-  const services: any[] = [];
-  snap.forEach((child) => {
-    const log = child.val();
-    // Transform backend data to match frontend interface
-    services.push({
-      id: log.id,
-      name: log.name ||
-        `${log.service_type.replace(/_/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase())} Service`,
-      type: mapServiceType(log.service_type),
-      provider: log.provider || "Internal Team",
-      cost: log.cost || 0,
-      status: log.status || mapServiceStatus(log),
-      scheduledDate: new Date(log.service_date).toISOString().split("T")[0],
-      generatorId: log.generator_id,
-      description: log.description || log.notes ||
-        `${log.service_type.replace(/_/g, " ")} service for generator ${log.generator_id}`
-    });
-  });
-
-  return { services };
+  const { id } = req.data ?? {};
+  if (!id) throw new HttpsError("invalid-argument", "id required.");
+  const snap = await ref().child(id).once("value");
+  if (!snap.exists()) throw new HttpsError("not-found", `Service log ${id} not found.`);
+  return { ok: true, data: snap.val() };
 });
 
-// Callable: create service request
-export const createService = onCall({ region: REGION }, async (req) => {
-  assertTechnicianOrAdmin(req);
+export const listServiceLogs = onCall({ region: REGION }, async (req) => {
+  if (!req.auth) throw new HttpsError("unauthenticated", "Sign in required.");
   const {
-    id,
-    name,
-    type,
-    provider,
-    cost,
-    scheduledDate,
-    generatorId,
-    description
-  } = req.data || {};
+    generator_id,
+    service_type,
+    date_from,
+    date_to,
+    limit = 100,
+    cursor
+  }: {
+    generator_id?: string;
+    service_type?: ServiceType;
+    date_from?: number;
+    date_to?: number;
+    limit?: number;
+    cursor?: string;
+  } = req.data ?? {};
 
-  if (!id || !name || !type) {
-    throw new HttpsError("invalid-argument", "id, name, type are required.");
-  }
+  const snap = await ref().once("value");
+  if (!snap.exists()) return { ok: true, items: [], nextCursor: null };
 
-  const validTypes = ["maintenance", "repair", "inspection", "installation"];
-  if (!validTypes.includes(type)) {
-    throw new HttpsError("invalid-argument",
-      "Invalid service type. Must be: maintenance, repair, inspection, or installation");
-  }
+  let arr: any[] = [];
+  snap.forEach((c) => {
+    arr.push(c.val());
+    return false;
+  });
+  if (generator_id) arr = arr.filter((x) => x.generator_id === generator_id);
+  if (service_type) arr = arr.filter((x) => x.service_type === service_type);
+  if (typeof date_from === "number") arr = arr.filter((x) => (x.service_date ?? 0) >= date_from);
+  if (typeof date_to === "number") arr = arr.filter((x) => (x.service_date ?? 0) < date_to);
 
-  const now = Date.now();
-  const scheduledTimestamp = scheduledDate ? new Date(scheduledDate).getTime() : now;
+  arr.sort((a, b) => (b.service_date ?? 0) - (a.service_date ?? 0));
+  const start = cursor ? arr.findIndex((x) => String(x.id) === String(cursor)) + 1 : 0;
+  const page = arr.slice(start, start + Math.max(1, Math.min(limit, 500)));
+  const nextCursor = page.length && start + page.length < arr.length ? page[page.length - 1].id : null;
 
-  const payload = {
-    id,
-    name,
-    generator_id: generatorId || null,
-    technician_id: req.auth?.uid || null,
-    service_type: type,
-    service_date: scheduledTimestamp,
-    next_due_date: null,
-    notes: description || "",
-    description: description || "",
-    provider: provider || "Internal Team",
-    cost: cost || 0,
-    status: "scheduled",
-    overdue: false,
-    createdAt: now,
-    updatedAt: now
-  };
-
-  await serviceLogsRef().child(id).set(payload);
-  return { ok: true, id };
+  return { ok: true, items: page, nextCursor };
 });
 
-// Callable: update service status
-export const updateServiceStatus = onCall({ region: REGION }, async (req) => {
-  assertTechnicianOrAdmin(req);
-  const { serviceId, status } = req.data || {};
+export const updateServiceLog = onCall({ region: REGION }, async (req) => {
+  assertTechOrAdmin(req);
+  const { id, ...patch } = req.data ?? {};
+  if (!id) throw new HttpsError("invalid-argument", "id required.");
 
-  if (!serviceId || !status) {
-    throw new HttpsError("invalid-argument", "serviceId and status are required.");
+  const r = ref().child(id);
+  const snap = await r.once("value");
+  if (!snap.exists()) throw new HttpsError("not-found", `Service log ${id} not found.`);
+
+  if ("id" in patch) delete (patch as any).id;
+  if ("createdAt" in patch) delete (patch as any).createdAt;
+
+  if ("service_type" in patch) {
+    const t = patch.service_type as ServiceType;
+    if (!TYPES.includes(t)) {
+      throw new HttpsError("invalid-argument", `service_type must be ${TYPES.join(" | ")}`);
+    }
   }
 
-  const validStatuses = ["scheduled", "in-progress", "completed", "cancelled"];
-  if (!validStatuses.includes(status)) {
-    throw new HttpsError("invalid-argument", "Invalid status value.");
+  const updates: Record<string, any> = { ...patch, updatedAt: Date.now() };
+  if ("next_due_date" in updates) {
+    updates.overdue = updates.next_due_date ? Date.now() > updates.next_due_date : false;
   }
 
-  await serviceLogsRef().child(serviceId).update({
-    status,
-    updatedAt: Date.now()
-  });
-
+  await r.update(updates);
   return { ok: true };
 });
 
-// Callable: bulk update service statuses
-export const bulkUpdateServiceStatus = onCall({ region: REGION }, async (req) => {
-  assertTechnicianOrAdmin(req);
-  const { serviceUpdates } = req.data || {};
+export const deleteServiceLog = onCall({ region: REGION }, async (req) => {
+  assertTechOrAdmin(req);
+  const { id } = req.data ?? {};
+  if (!id) throw new HttpsError("invalid-argument", "id required.");
 
-  if (!serviceUpdates || !Array.isArray(serviceUpdates)) {
-    throw new HttpsError("invalid-argument", "serviceUpdates array is required.");
-  }
-
-  const validStatuses = ["scheduled", "in-progress", "completed", "cancelled"];
-  const updates: Record<string, any> = {};
-  const timestamp = Date.now();
-
-  serviceUpdates.forEach((update: any) => {
-    const { serviceId, status, cost, notes } = update;
-    if (serviceId && status && validStatuses.includes(status)) {
-      updates[`serviceLogs/${serviceId}/status`] = status;
-      if (cost !== undefined) updates[`serviceLogs/${serviceId}/cost`] = cost;
-      if (notes) updates[`serviceLogs/${serviceId}/notes`] = notes;
-      updates[`serviceLogs/${serviceId}/updatedAt`] = timestamp;
-    }
-  });
-
-  if (Object.keys(updates).length > 0) {
-    await admin.database().ref().update(updates);
-  }
-
-  return { ok: true, updated: serviceUpdates.length };
+  const r = ref().child(id);
+  const snap = await r.once("value");
+  if (!snap.exists()) throw new HttpsError("not-found", `Service log ${id} not found.`);
+  await r.remove();
+  return { ok: true, id };
 });
-
-// Callable: get service statistics for dashboard
-export const getServiceStats = onCall({ region: REGION }, async (req) => {
-  if (!req.auth) throw new HttpsError("unauthenticated", "Sign in required.");
-
-  const snap = await serviceLogsRef().get();
-  if (!snap.exists()) {
-    return {
-      totalServices: 0,
-      completedServices: 0,
-      totalCost: 0,
-      statusBreakdown: { "scheduled": 0, "in-progress": 0, "completed": 0, "cancelled": 0 },
-      typeBreakdown: { maintenance: 0, repair: 0, inspection: 0, installation: 0 }
-    };
-  }
-
-  let totalServices = 0;
-  let completedServices = 0;
-  let totalCost = 0;
-  const statusBreakdown = { "scheduled": 0, "in-progress": 0, "completed": 0, "cancelled": 0 };
-  const typeBreakdown = { maintenance: 0, repair: 0, inspection: 0, installation: 0 };
-
-  snap.forEach((child) => {
-    const log = child.val();
-    totalServices++;
-    totalCost += log.cost || 0;
-
-    const status = log.status || mapServiceStatus(log);
-    const type = mapServiceType(log.service_type);
-
-    if (status === "completed") completedServices++;
-
-    if (Object.prototype.hasOwnProperty.call(statusBreakdown, status)) {
-      statusBreakdown[status as keyof typeof statusBreakdown]++;
-    }
-
-    if (Object.prototype.hasOwnProperty.call(typeBreakdown, type)) {
-      typeBreakdown[type as keyof typeof typeBreakdown]++;
-    }
-  });
-
-  return {
-    totalServices,
-    completedServices,
-    totalCost,
-    statusBreakdown,
-    typeBreakdown
-  };
-});
-
-// Helper functions
-function mapServiceType(serviceType: string) {
-  const typeMap: Record<string, string> = {
-    "preventive_maintenance": "maintenance",
-    "corrective_maintenance": "maintenance",
-    "emergency_repair": "repair",
-    "routine_repair": "repair",
-    "safety_inspection": "inspection",
-    "compliance_inspection": "inspection",
-    "new_installation": "installation",
-    "upgrade_installation": "installation",
-    "maintenance": "maintenance",
-    "repair": "repair",
-    "inspection": "inspection",
-    "installation": "installation"
-  };
-  return typeMap[serviceType] || "maintenance";
-}
-
-function mapServiceStatus(log: any) {
-  if (log.status) return log.status;
-
-  const now = Date.now();
-  if (log.next_due_date && log.next_due_date < now) return "completed";
-  if (log.service_date > now) return "scheduled";
-  return "in-progress";
-}
-

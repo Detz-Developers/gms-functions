@@ -44,7 +44,7 @@ export const sendNotification = onCall({ region: REGION }, async (req) => {
     type: type ?? "general", // task, issue, invoice, etc.
     related_id: related_id ?? null,
     read: false,
-    createdAt: now,
+    createdAt: now
   };
 
   await notificationsRef(role, uid).child(notifId).set(payload);
