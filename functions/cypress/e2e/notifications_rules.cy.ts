@@ -13,7 +13,7 @@ describe("RealtimeDB Rules - Notifications", () => {
     await signOut(auth);
   });
 
-  // ✅ User read/write own → allow
+  //  User read/write own → allow
   it("allows user to write & read their own notifications", async () => {
     const userCred = await signInWithEmailAndPassword(auth, "operator@gmail.com", "Temp@123");
     const uid = userCred.user.uid;
@@ -35,7 +35,7 @@ describe("RealtimeDB Rules - Notifications", () => {
     expect(snap.val().title).to.eq("Test");
   });
 
-  // ✅ Admin write → allow
+  //  Admin write → allow
   it("allows admin to write a notification for another user", async () => {
     const adminCred = await signInWithEmailAndPassword(auth, "admin@gmail.com", "Temp@123");
     const role = (await adminCred.user.getIdTokenResult()).claims.role;
@@ -56,7 +56,7 @@ describe("RealtimeDB Rules - Notifications", () => {
     expect(snap.val().title).to.eq("Admin notice");
   });
 
-  // ❌ Other users read/write → deny
+  //  Other users read/write → deny
   it("denies reading another user’s notifications", async () => {
   const userCred = await signInWithEmailAndPassword(auth, "tech@gmail.com", "Temp@123");
   const uid = userCred.user.uid; // ✅ real uid
