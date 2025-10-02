@@ -22,15 +22,20 @@
     "firebase-functions": "^6.4.0"
   },
   "devDependencies": {
+    "@types/chai": "^5.2.2",
     "@types/cypress": "^0.1.6",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24.6.2",
     "@typescript-eslint/eslint-plugin": "^8.43.0",
     "@typescript-eslint/parser": "^8.43.0",
+    "copyfiles": "^2.4.1",
     "cypress": "^15.3.0",
     "eslint": "^8.57.0",
     "eslint-config-google": "^0.14.0",
     "eslint-plugin-import": "^2.25.4",
     "firebase-functions-test": "^3.4.1",
-    "typescript": "^5.9.2"
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
   },
   "private": true
 }
